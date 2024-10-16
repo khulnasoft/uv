@@ -13,6 +13,7 @@ use uv_cache::Cache;
 use uv_fs::which::is_executable;
 use uv_fs::Simplified;
 use uv_pep440::{Prerelease, Version, VersionSpecifier, VersionSpecifiers};
+use uv_static::EnvVars;
 use uv_warnings::warn_user_once;
 
 use crate::downloads::PythonDownloadRequest;
@@ -132,7 +133,7 @@ pub enum EnvironmentPreference {
     Any,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum PythonVariant {
     #[default]
     Default,
@@ -344,7 +345,7 @@ fn python_executables_from_installed<'a>(
                 }
             };
 
-            env::var_os("UV_TEST_PYTHON_PATH")
+            env::var_os(EnvVars::UV_TEST_PYTHON_PATH)
                 .is_none()
                 .then(|| {
                     registry_pythons()
@@ -401,7 +402,7 @@ fn python_executables<'a>(
 ) -> Box<dyn Iterator<Item = Result<(PythonSource, PathBuf), Error>> + 'a> {
     // Always read from `UV_INTERNAL__PARENT_INTERPRETER` — it could be a system interpreter
     let from_parent_interpreter = std::iter::once_with(|| {
-        std::env::var_os("UV_INTERNAL__PARENT_INTERPRETER")
+        std::env::var_os(EnvVars::UV_INTERNAL__PARENT_INTERPRETER)
             .into_iter()
             .map(|path| Ok((PythonSource::ParentInterpreter, PathBuf::from(path))))
     })
@@ -443,8 +444,8 @@ fn python_executables_from_search_path<'a>(
     implementation: Option<&'a ImplementationName>,
 ) -> impl Iterator<Item = PathBuf> + 'a {
     // `UV_TEST_PYTHON_PATH` can be used to override `PATH` to limit Python executable availability in the test suite
-    let search_path =
-        env::var_os("UV_TEST_PYTHON_PATH").unwrap_or(env::var_os("PATH").unwrap_or_default());
+    let search_path = env::var_os(EnvVars::UV_TEST_PYTHON_PATH)
+        .unwrap_or(env::var_os(EnvVars::PATH).unwrap_or_default());
 
     let version_request = version.unwrap_or(&VersionRequest::Default);
     let possible_names: Vec<_> = version_request
@@ -1224,6 +1225,14 @@ fn is_windows_store_shim(_path: &Path) -> bool {
     false
 }
 
+impl PythonVariant {
+    fn matches_interpreter(self, interpreter: &Interpreter) -> bool {
+        match self {
+            PythonVariant::Default => !interpreter.gil_disabled(),
+            PythonVariant::Freethreaded => interpreter.gil_disabled(),
+        }
+    }
+}
 impl PythonRequest {
     /// Create a request from a string.
     ///
@@ -1797,27 +1806,30 @@ impl VersionRequest {
 
     /// Check if a interpreter matches the requested Python version.
     pub(crate) fn matches_interpreter(&self, interpreter: &Interpreter) -> bool {
-        if self.is_freethreaded() && !interpreter.gil_disabled() {
-            return false;
-        }
         match self {
-            Self::Any | Self::Default => true,
-            Self::Major(major, _) => interpreter.python_major() == *major,
-            Self::MajorMinor(major, minor, _) => {
-                (interpreter.python_major(), interpreter.python_minor()) == (*major, *minor)
+            Self::Any => true,
+            // Do not use free-threaded interpreters by default
+            Self::Default => PythonVariant::Default.matches_interpreter(interpreter),
+            Self::Major(major, variant) => {
+                interpreter.python_major() == *major && variant.matches_interpreter(interpreter)
             }
-            Self::MajorMinorPatch(major, minor, patch, _) => {
+            Self::MajorMinor(major, minor, variant) => {
+                (interpreter.python_major(), interpreter.python_minor()) == (*major, *minor)
+                    && variant.matches_interpreter(interpreter)
+            }
+            Self::MajorMinorPatch(major, minor, patch, variant) => {
                 (
                     interpreter.python_major(),
                     interpreter.python_minor(),
                     interpreter.python_patch(),
                 ) == (*major, *minor, *patch)
+                    && variant.matches_interpreter(interpreter)
             }
-            Self::Range(specifiers, _) => {
+            Self::Range(specifiers, variant) => {
                 let version = interpreter.python_version().only_release();
-                specifiers.contains(&version)
+                specifiers.contains(&version) && variant.matches_interpreter(interpreter)
             }
-            Self::MajorMinorPrerelease(major, minor, prerelease, _) => {
+            Self::MajorMinorPrerelease(major, minor, prerelease, variant) => {
                 let version = interpreter.python_version();
                 let Some(interpreter_prerelease) = version.pre() else {
                     return false;
@@ -1827,6 +1839,7 @@ impl VersionRequest {
                     interpreter.python_minor(),
                     interpreter_prerelease,
                 ) == (*major, *minor, *prerelease)
+                    && variant.matches_interpreter(interpreter)
             }
         }
     }
@@ -1975,6 +1988,19 @@ impl VersionRequest {
             Self::Range(specifiers, _) => Self::Range(specifiers, PythonVariant::Default),
         }
     }
+
+    /// Return the required [`PythonVariant`] of the request.
+    pub(crate) fn variant(&self) -> Option<PythonVariant> {
+        match self {
+            Self::Any => None,
+            Self::Default => Some(PythonVariant::Default),
+            Self::Major(_, variant)
+            | Self::MajorMinor(_, _, variant)
+            | Self::MajorMinorPatch(_, _, _, variant)
+            | Self::MajorMinorPrerelease(_, _, _, variant)
+            | Self::Range(_, variant) => Some(*variant),
+        }
+    }
 }
 
 impl FromStr for VersionRequest {
@@ -2045,6 +2071,27 @@ impl FromStr for VersionRequest {
                 Ok(Self::MajorMinorPatch(*major, *minor, *patch, variant))
             }
             _ => Err(Error::InvalidVersionRequest(s.to_string())),
+        }
+    }
+}
+
+impl FromStr for PythonVariant {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "t" | "freethreaded" => Ok(Self::Freethreaded),
+            "" => Ok(Self::Default),
+            _ => Err(()),
+        }
+    }
+}
+
+impl std::fmt::Display for PythonVariant {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Default => f.write_str("default"),
+            Self::Freethreaded => f.write_str("freethreaded"),
         }
     }
 }
