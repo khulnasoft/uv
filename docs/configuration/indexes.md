@@ -18,6 +18,8 @@ name = "pytorch"
 url = "https://download.pytorch.org/whl/cpu"
 ```
 
+Index names must only contain alphanumeric characters, dashes, or underscores.
+
 Indexes are prioritized in the order in which they’re defined, such that the first index listed in
 the configuration file is the first index consulted when resolving dependencies, with indexes
 provided via the command line taking precedence over those in the configuration file.
@@ -56,20 +58,20 @@ disambiguated by environment markers:
 
 ```toml title="pyproject.toml"
 [project]
-dependencies = ["pytorch"]
+dependencies = ["torch"]
 
 [tool.uv.sources]
-pytorch = [
-  { index = "torch-cu118", marker = "sys_platform == 'darwin'"},
-  { index = "torch-cu124", marker = "sys_platform != 'darwin'"},
+torch = [
+  { index = "pytorch-cu118", marker = "sys_platform == 'darwin'"},
+  { index = "pytorch-cu124", marker = "sys_platform != 'darwin'"},
 ]
 
 [[tool.uv.index]]
-name = "torch-cu118"
+name = "pytorch-cu118"
 url = "https://download.pytorch.org/whl/cu118"
 
 [[tool.uv.index]]
-name = "torch-cu124"
+name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
 ```
 
@@ -150,7 +152,7 @@ Alternatively, credentials can be embedded directly in the index definition:
 ```toml
 [[tool.uv.index]]
 name = "internal"
-url = "https://public:koala@https://pypi-proxy.corp.dev/simple"
+url = "https://public:koala@pypi-proxy.corp.dev/simple"
 ```
 
 For security purposes, credentials are _never_ stored in the `uv.lock` file; as such, uv _must_ have
@@ -162,8 +164,8 @@ In addition to the `[[tool.uv.index]]` configuration option, uv supports pip-sty
 `--extra-index-url` command-line options for compatibility, where `--index-url` defines the default
 index and `--extra-index-url` defines additional indexes.
 
-These options can be used in conjunction with the `[[tool.uv.index]]` configuration option, and use
-the same prioritization rules:
+These options can be used in conjunction with the `[[tool.uv.index]]` configuration option, and
+follow the same prioritization rules:
 
 - The default index is always treated as lowest priority, whether defined via the legacy
   `--index-url` argument, the recommended `--default-index` argument, or a `[[tool.uv.index]]` entry
@@ -172,4 +174,5 @@ the same prioritization rules:
   `--extra-index-url` argument, the recommended `--index` argument, or `[[tool.uv.index]]` entries.
 
 In effect, `--index-url` and `--extra-index-url` can be thought of as unnamed `[[tool.uv.index]]`
-entries, with `default = true` enabled for the former.
+entries, with `default = true` enabled for the former. In that context, `--index-url` maps to
+`--default-index`, and `--extra-index-url` maps to `--index`.

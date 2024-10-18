@@ -12,7 +12,7 @@ use url::Url;
 use uv_cache::CacheArgs;
 use uv_configuration::{
     ConfigSettingEntry, ExportFormat, IndexStrategy, KeyringProviderType, PackageNameSpecifier,
-    TargetTriple, TrustedHost, TrustedPublishing, VersionControlSystem,
+    ProjectBuildBackend, TargetTriple, TrustedHost, TrustedPublishing, VersionControlSystem,
 };
 use uv_distribution_types::{Index, IndexUrl, Origin, PipExtraIndex, PipFindLinks, PipIndex};
 use uv_normalize::{ExtraName, PackageName};
@@ -408,7 +408,6 @@ pub enum Commands {
     Cache(CacheNamespace),
     /// Manage the uv executable.
     #[command(name = "self")]
-    #[cfg(feature = "self-update")]
     Self_(SelfNamespace),
     /// Clear the cache, removing all entries or those linked to specific packages.
     #[command(hide = true)]
@@ -449,21 +448,18 @@ pub struct HelpArgs {
 }
 
 #[derive(Args)]
-#[cfg(feature = "self-update")]
 pub struct SelfNamespace {
     #[command(subcommand)]
     pub command: SelfCommand,
 }
 
 #[derive(Subcommand)]
-#[cfg(feature = "self-update")]
 pub enum SelfCommand {
     /// Update uv.
     Update(SelfUpdateArgs),
 }
 
 #[derive(Args, Debug)]
-#[cfg(feature = "self-update")]
 pub struct SelfUpdateArgs {
     /// Update to the specified version. If not provided, uv will update to the latest version.
     pub target_version: Option<String>,
@@ -2525,6 +2521,10 @@ pub struct InitArgs {
     #[arg(long, value_enum, conflicts_with = "script")]
     pub vcs: Option<VersionControlSystem>,
 
+    /// Initialize a build-backend of choice for the project.
+    #[arg(long, value_enum, conflicts_with_all=["script", "no_package"])]
+    pub build_backend: Option<ProjectBuildBackend>,
+
     /// Do not create a `README.md` file.
     #[arg(long)]
     pub no_readme: bool,
@@ -2679,7 +2679,7 @@ pub struct RunArgs {
     ///
     /// Requires that the lockfile is up-to-date. If the lockfile is missing or
     /// needs to be updated, uv will exit with an error.
-    #[arg(long, conflicts_with = "frozen")]
+    #[arg(long, env = EnvVars::UV_LOCKED, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "frozen")]
     pub locked: bool,
 
     /// Run without updating the `uv.lock` file.
@@ -2689,7 +2689,7 @@ pub struct RunArgs {
     /// exit with an error. If the `pyproject.toml` includes changes to
     /// dependencies that have not been included in the lockfile yet, they will
     /// not be present in the environment.
-    #[arg(long, conflicts_with = "locked")]
+    #[arg(long, env = EnvVars::UV_FROZEN, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "locked")]
     pub frozen: bool,
 
     /// Run the given path as a Python script.
@@ -2832,7 +2832,7 @@ pub struct SyncArgs {
     ///
     /// Requires that the lockfile is up-to-date. If the lockfile is missing or
     /// needs to be updated, uv will exit with an error.
-    #[arg(long, conflicts_with = "frozen")]
+    #[arg(long, env = EnvVars::UV_LOCKED, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "frozen")]
     pub locked: bool,
 
     /// Sync without updating the `uv.lock` file.
@@ -2842,7 +2842,7 @@ pub struct SyncArgs {
     /// exit with an error. If the `pyproject.toml` includes changes to dependencies
     /// that have not been included in the lockfile yet, they will not be
     /// present in the environment.
-    #[arg(long, conflicts_with = "locked")]
+    #[arg(long, env = EnvVars::UV_FROZEN, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "locked")]
     pub frozen: bool,
 
     #[command(flatten)]
@@ -2892,11 +2892,11 @@ pub struct LockArgs {
     ///
     /// Requires that the lockfile is up-to-date. If the lockfile is missing or
     /// needs to be updated, uv will exit with an error.
-    #[arg(long, conflicts_with = "frozen")]
+    #[arg(long, env = EnvVars::UV_LOCKED, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "frozen")]
     pub locked: bool,
 
     /// Assert that a `uv.lock` exists, without updating it.
-    #[arg(long, conflicts_with = "locked")]
+    #[arg(long, env = EnvVars::UV_FROZEN, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "locked")]
     pub frozen: bool,
 
     #[command(flatten)]
@@ -3005,13 +3005,13 @@ pub struct AddArgs {
     ///
     /// Requires that the lockfile is up-to-date. If the lockfile is missing or
     /// needs to be updated, uv will exit with an error.
-    #[arg(long, conflicts_with = "frozen")]
+    #[arg(long, env = EnvVars::UV_LOCKED, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "frozen")]
     pub locked: bool,
 
     /// Add dependencies without re-locking the project.
     ///
     /// The project environment will not be synced.
-    #[arg(long, conflicts_with = "locked")]
+    #[arg(long, env = EnvVars::UV_FROZEN, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "locked")]
     pub frozen: bool,
 
     #[command(flatten)]
@@ -3075,13 +3075,13 @@ pub struct RemoveArgs {
     ///
     /// Requires that the lockfile is up-to-date. If the lockfile is missing or
     /// needs to be updated, uv will exit with an error.
-    #[arg(long, conflicts_with = "frozen")]
+    #[arg(long, env = EnvVars::UV_LOCKED, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "frozen")]
     pub locked: bool,
 
     /// Remove dependencies without re-locking the project.
     ///
     /// The project environment will not be synced.
-    #[arg(long, conflicts_with = "locked")]
+    #[arg(long, env = EnvVars::UV_FROZEN, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "locked")]
     pub frozen: bool,
 
     #[command(flatten)]
@@ -3150,13 +3150,13 @@ pub struct TreeArgs {
     ///
     /// Requires that the lockfile is up-to-date. If the lockfile is missing or
     /// needs to be updated, uv will exit with an error.
-    #[arg(long, conflicts_with = "frozen")]
+    #[arg(long, env = EnvVars::UV_LOCKED, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "frozen")]
     pub locked: bool,
 
     /// Display the requirements without locking the project.
     ///
     /// If the lockfile is missing, uv will exit with an error.
-    #[arg(long, conflicts_with = "locked")]
+    #[arg(long, env = EnvVars::UV_FROZEN, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "locked")]
     pub frozen: bool,
 
     #[command(flatten)]
@@ -3298,13 +3298,13 @@ pub struct ExportArgs {
     ///
     /// Requires that the lockfile is up-to-date. If the lockfile is missing or
     /// needs to be updated, uv will exit with an error.
-    #[arg(long, conflicts_with = "frozen")]
+    #[arg(long, env = EnvVars::UV_LOCKED, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "frozen")]
     pub locked: bool,
 
     /// Do not update the `uv.lock` before exporting.
     ///
     /// If a `uv.lock` does not exist, uv will exit with an error.
-    #[arg(long, conflicts_with = "locked")]
+    #[arg(long, env = EnvVars::UV_FROZEN, value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "locked")]
     pub frozen: bool,
 
     #[command(flatten)]

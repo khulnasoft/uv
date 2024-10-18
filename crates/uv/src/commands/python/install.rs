@@ -167,6 +167,7 @@ pub(crate) async fn install(
                 // Ensure the installations have externally managed markers
                 let managed = ManagedPythonInstallation::new(path.clone())?;
                 managed.ensure_externally_managed()?;
+                managed.ensure_canonical_executables()?;
             }
             Err(err) => {
                 errors.push((key, err));
@@ -234,7 +235,12 @@ pub(crate) async fn install(
                 key.green()
             )?;
             for err in anyhow::Error::new(err).chain() {
-                writeln!(printer.stderr(), "  {}: {}", "Caused by".red().bold(), err)?;
+                writeln!(
+                    printer.stderr(),
+                    "  {}: {}",
+                    "Caused by".red().bold(),
+                    err.to_string().trim()
+                )?;
             }
         }
         return Ok(ExitStatus::Failure);

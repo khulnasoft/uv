@@ -806,6 +806,13 @@ async fn run(mut cli: Cli) -> Result<ExitStatus> {
                     token,
                 }),
         }) => commands::self_update(target_version, token, printer).await,
+        #[cfg(not(feature = "self-update"))]
+        Commands::Self_(_) => {
+            anyhow::bail!(
+                "uv was installed through an external package manager, and self-update \
+                is not available. Please use your package manager to update uv."
+            );
+        }
         Commands::Version { output_format } => {
             commands::version(output_format, &mut stdout())?;
             Ok(ExitStatus::Success)
@@ -1217,6 +1224,7 @@ async fn run_project(
                 args.package,
                 args.kind,
                 args.vcs,
+                args.build_backend,
                 args.no_readme,
                 args.author_from,
                 args.no_pin_python,
@@ -1529,25 +1537,19 @@ where
             if let Some(ContextValue::String(subcommand)) = err.get(ContextKind::InvalidSubcommand)
             {
                 match subcommand.as_str() {
-                    "compile" | "lock" => {
+                    "compile" => {
                         err.insert(
                             ContextKind::SuggestedSubcommand,
                             ContextValue::String("uv pip compile".to_string()),
                         );
                     }
-                    "sync" => {
-                        err.insert(
-                            ContextKind::SuggestedSubcommand,
-                            ContextValue::String("uv pip sync".to_string()),
-                        );
-                    }
-                    "install" | "add" => {
+                    "install" => {
                         err.insert(
                             ContextKind::SuggestedSubcommand,
                             ContextValue::String("uv pip install".to_string()),
                         );
                     }
-                    "uninstall" | "remove" => {
+                    "uninstall" => {
                         err.insert(
                             ContextKind::SuggestedSubcommand,
                             ContextValue::String("uv pip uninstall".to_string()),
@@ -1569,12 +1571,6 @@ where
                         err.insert(
                             ContextKind::SuggestedSubcommand,
                             ContextValue::String("uv pip show".to_string()),
-                        );
-                    }
-                    "tree" => {
-                        err.insert(
-                            ContextKind::SuggestedSubcommand,
-                            ContextValue::String("uv pip tree".to_string()),
                         );
                     }
                     _ => {}
@@ -1628,9 +1624,13 @@ where
         Ok(code) => code.into(),
         Err(err) => {
             let mut causes = err.chain();
-            eprintln!("{}: {}", "error".red().bold(), causes.next().unwrap());
+            eprintln!(
+                "{}: {}",
+                "error".red().bold(),
+                causes.next().unwrap().to_string().trim()
+            );
             for err in causes {
-                eprintln!("  {}: {}", "Caused by".red().bold(), err);
+                eprintln!("  {}: {}", "Caused by".red().bold(), err.to_string().trim());
             }
             ExitStatus::Error.into()
         }
